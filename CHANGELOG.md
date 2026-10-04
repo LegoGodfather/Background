@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Bound the remaining upstream body reads (FIRMS, CelesTrak, adsb.lol,
+  TomTom, OpenSky, adsbdb) with streaming size caps and shared deadlines; the
+  adsb.lol military poll gains a deadline of its own.
+
 ## [0.2.1] — 2026-10-02 — God's Eye View through Your Agent (with security fixes and other features)
 
 - Ship each bundled data pack once. The region, marine, admin-boundary,
