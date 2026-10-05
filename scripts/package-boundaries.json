@@ -871,6 +871,8 @@
       "src/layers/vessels/evidence.js",
       "src/layers/vessels/index.js",
       "src/layers/vessels/ingestion.js",
+      "src/layers/vessels/cameraArea.js",
+      "src/layers/vessels/viewArea.js",
       "src/layers/vessels/lifecycle.js",
       "src/layers/vessels/policy.js",
       "src/layers/vessels/queries.js",
@@ -1724,7 +1726,9 @@
       "src/layers/vessels/cards.js",
       "src/layers/vessels/evidence.js",
       "src/layers/vessels/index.js",
+      "src/layers/vessels/cameraArea.js",
       "src/layers/vessels/ingestion.js",
+      "src/layers/vessels/viewArea.js",
       "src/layers/vessels/lifecycle.js",
       "src/layers/vessels/policy.js",
       "src/layers/vessels/queries.js",
@@ -2397,7 +2401,9 @@
       "src/layers/vessels/cards.js",
       "src/layers/vessels/evidence.js",
       "src/layers/vessels/index.js",
+      "src/layers/vessels/cameraArea.js",
       "src/layers/vessels/ingestion.js",
+      "src/layers/vessels/viewArea.js",
       "src/layers/vessels/lifecycle.js",
       "src/layers/vessels/policy.js",
       "src/layers/vessels/queries.js",
@@ -2746,6 +2752,7 @@
     "exports": ["./layers/vessels/ingestion"],
     "modules": [
       "src/layers/vessels/ingestion.js",
+      "src/layers/vessels/viewArea.js",
       "src/layers/vessels/recordPolicy.js"
     ],
     "external": []
@@ -3168,6 +3175,15 @@
       "src/tools/mcp/http.js",
       "src/tools/catalog.js",
       "src/tools/schema.js"
+    ],
+    "external": []
+  },
+  "tools-panel": {
+    "exports": ["./tools/panel"],
+    "modules": [
+      "src/tools/panel.js",
+      "src/tools/globePanel.js",
+      "src/app/globePanelRuntime.js"
     ],
     "external": []
   },
