@@ -21,6 +21,7 @@ import { openAiRealtimeProxy } from 'gods-eye-view/server/providers/openai';
 import { keySetupEndpoint } from 'gods-eye-view/server/standalone/key-setup';
 import { realtimeInstructions } from '../../server/providers/openai/instructions.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
+import { createDebugLogHandler } from '../../server/providers/openai/debug-log.js';
 import { standaloneVoiceTools } from '../../server/standalone/voiceTools.js';
 
 function install(plugin, preview = false) {
@@ -194,6 +195,30 @@ test('Realtime handler preserves tools and default instructions, isolates suppli
   }
   assert.notEqual(sent[0].session.instructions, sent[1].session.instructions);
   assert.equal(sent[0].session.instructions, sent[2].session.instructions);
+});
+
+test('caption transcription is on by default, reported to the client meter, and can be turned off', async (t) => {
+  env(t, 'OPENAI_API_KEY', 'fixture-upstream-secret');
+  env(t, 'GEV_RATELIMIT_OPENAI_PER_MIN', undefined);
+  const sent = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    sent.push(JSON.parse(options.body));
+    return Response.json({ value: 'fixture-ephemeral' });
+  });
+  for (const [setting, expected] of [
+    [undefined, 'gpt-4o-mini-transcribe'],
+    ['off', 'off'],
+  ]) {
+    env(t, 'OPENAI_REALTIME_TRANSCRIBE_MODEL', setting);
+    const response = await request(
+      install(openAiRealtimeProxy()).get('/api/realtime/token'),
+    );
+    assert.equal(response.headers['x-gev-voice-transcribe-model'], expected);
+    assert.equal(
+      sent.at(-1).session.audio.input.transcription?.model ?? 'off',
+      expected,
+    );
+  }
 });
 
 test('Realtime sessions carry supplied tools, and the standalone voice adds the catalog queries', async (t) => {
@@ -372,6 +397,187 @@ test('OpenAI routes answer generically when the upstream or the request fails', 
   assert.deepEqual(token.json(), { error: 'Failed to create Realtime token' });
   assert.equal(token.body.includes('api.openai.com'), false);
   assert.equal(token.body.includes('fixture-upstream-secret'), false);
+});
+
+test('the debug-log sink omits what people said and tool arguments unless content logging is enabled', async (t) => {
+  const nestObject = (value, levels) => {
+    let nested = value;
+    for (let index = 0; index < levels; index += 1) nested = { nested };
+    return nested;
+  };
+  const nestArray = (value, levels) => {
+    let nested = value;
+    for (let index = 0; index < levels; index += 1) nested = [nested];
+    return nested;
+  };
+  const records = [
+    {
+      timestamp: '2026-10-05T00:00:00.000Z',
+      sessionId: 'gev-session-1',
+      event: 'tool.call',
+      status: 'active',
+      payload: {
+        name: 'analyst_query',
+        callId: 'call-1',
+        arguments: { location: '12 Elm Street', note: 'meet Alice there' },
+      },
+    },
+    {
+      timestamp: '2026-10-05T00:00:01.000Z',
+      sessionId: 'gev-session-1',
+      event: 'server.event',
+      status: 'active',
+      payload: {
+        type: 'response.function_call_arguments.done',
+        eventId: 'event-1',
+        responseId: 'response-1',
+        payload: {
+          type: 'response.function_call_arguments.done',
+          event_id: 'event-1',
+          response_id: 'response-1',
+          item_id: 'item-1',
+          output_index: 0,
+          call_id: 'call-1',
+          name: 'analyst_query',
+          arguments: '{"query":"Tokyo Station"}',
+        },
+      },
+    },
+    {
+      event: 'server.event',
+      status: 'active',
+      payload: {
+        type: 'response.audio_transcript.done',
+        transcript: 'my home address is 12 Elm Street',
+        text: 'call my sister',
+        delta: 'Flying to Tokyo.',
+        usage: { input_tokens: 40 },
+      },
+    },
+    {
+      event: 'voice.cost',
+      status: 'active',
+      payload: { delta: 17, total: 41 },
+    },
+    {
+      event: 'tool.call',
+      status: 'active',
+      payload: { name: 'adjust_camera_zoom', callId: 'call-2', arguments: 2 },
+    },
+    {
+      event: 'deep.object',
+      status: 'active',
+      payload: nestObject(
+        {
+          transcript: 'deep-object-transcript-secret',
+          arguments: { query: 'deep-object-argument-secret' },
+        },
+        14,
+      ),
+    },
+    {
+      event: 'deep.array',
+      status: 'active',
+      payload: nestArray(
+        {
+          transcript: 'deep-array-transcript-secret',
+          arguments: { query: 'deep-array-argument-secret' },
+        },
+        14,
+      ),
+    },
+  ];
+  for (const includeContent of [false, true]) {
+    const sourceRoot = root(t);
+    const handler = createDebugLogHandler({ sourceRoot, includeContent });
+    for (const record of records) {
+      const response = await request(handler, {
+        method: 'POST',
+        body: JSON.stringify(record),
+      });
+      assert.equal(response.status, 204);
+    }
+    const logged = readFileSync(
+      path.join(sourceRoot, '.gev-logs/realtime-conversations.jsonl'),
+      'utf8',
+    );
+    assert.equal(logged.includes('Elm Street'), includeContent);
+    assert.equal(logged.includes('call my sister'), includeContent);
+    assert.equal(logged.includes('meet Alice there'), includeContent);
+    assert.equal(logged.includes('Tokyo Station'), includeContent);
+    assert.equal(logged.includes('Flying to Tokyo'), includeContent);
+    assert.equal(
+      logged.includes('deep-object-transcript-secret'),
+      includeContent,
+    );
+    assert.equal(
+      logged.includes('deep-object-argument-secret'),
+      includeContent,
+    );
+    assert.equal(
+      logged.includes('deep-array-transcript-secret'),
+      includeContent,
+    );
+    assert.equal(logged.includes('deep-array-argument-secret'), includeContent);
+    const [
+      toolCall,
+      serverEvent,
+      transcriptEvent,
+      numericDelta,
+      numericArguments,
+      deepObject,
+      deepArray,
+    ] = logged
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.equal(toolCall.timestamp, records[0].timestamp);
+    assert.equal(toolCall.sessionId, 'gev-session-1');
+    assert.equal(toolCall.event, 'tool.call');
+    assert.equal(toolCall.status, 'active');
+    assert.equal(toolCall.payload.name, 'analyst_query');
+    assert.equal(toolCall.payload.callId, 'call-1');
+    assert.equal(serverEvent.payload.eventId, 'event-1');
+    assert.equal(serverEvent.payload.responseId, 'response-1');
+    assert.equal(serverEvent.payload.payload.event_id, 'event-1');
+    assert.equal(serverEvent.payload.payload.response_id, 'response-1');
+    assert.equal(serverEvent.payload.payload.item_id, 'item-1');
+    assert.equal(serverEvent.payload.payload.output_index, 0);
+    assert.equal(serverEvent.payload.payload.call_id, 'call-1');
+    assert.equal(serverEvent.payload.payload.name, 'analyst_query');
+    assert.equal(transcriptEvent.payload.usage.input_tokens, 40);
+    assert.equal(numericDelta.payload.delta, 17);
+    assert.equal(numericDelta.payload.total, 41);
+    if (!includeContent) {
+      assert.equal(toolCall.payload.arguments, '[omitted]');
+      assert.match(
+        serverEvent.payload.payload.arguments,
+        /^\[omitted \d+ chars\]$/,
+      );
+      assert.equal(transcriptEvent.payload.transcript, '[omitted 32 chars]');
+      assert.equal(transcriptEvent.payload.text, '[omitted 14 chars]');
+      assert.equal(transcriptEvent.payload.delta, '[omitted 16 chars]');
+      assert.equal(numericArguments.payload.arguments, '[omitted]');
+      assert.equal(
+        JSON.stringify(deepObject.payload).includes('[omitted: max depth]'),
+        true,
+      );
+      assert.equal(
+        JSON.stringify(deepArray.payload).includes('[omitted: max depth]'),
+        true,
+      );
+    } else {
+      assert.deepEqual(
+        toolCall.payload.arguments,
+        records[0].payload.arguments,
+      );
+      assert.equal(
+        serverEvent.payload.payload.arguments,
+        records[1].payload.payload.arguments,
+      );
+      assert.equal(numericArguments.payload.arguments, 2);
+    }
+  }
 });
 
 test('the debug-log sink stays bounded, rate limited, and quiet about failures', async (t) => {
