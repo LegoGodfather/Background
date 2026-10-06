@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Keep later satellites when a TLE catalog entry is missing an orbital line.
+  The parser skips the incomplete set and resumes at the next complete named
+  set, instead of losing the rest of the group (#906).
 - Add Norway's road cameras from Statens vegvesen as a CCTV pack. The camera
   list is one keyless GeoJSON request to the agency's OGC API view of its
   DATEX 3.1 CCTV table, so no DATEX account is needed. Every working camera
